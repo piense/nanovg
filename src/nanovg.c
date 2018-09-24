@@ -2785,6 +2785,144 @@ int nvgTextBreakLines(NVGcontext* ctx, const char* string, const char* end, floa
 	return nrows;
 }
 
+int nvgTextBreakLinesNoWrap(NVGcontext* ctx, const char* string, const char* end, NVGtextRow* rows, int maxRows)
+{
+	NVGstate* state = nvg__getState(ctx);
+	float scale = nvg__getFontScale(state) * ctx->devicePxRatio;
+	float invscale = 1.0f / scale;
+	FONStextIter iter, prevIter;
+	FONSquad q;
+	int nrows = 0;
+	float rowStartX = 0;
+	float rowWidth = 0;
+	float rowMinX = 0;
+	float rowMaxX = 0;
+	const char* rowStart = NULL;
+	const char* rowEnd = NULL;
+	const char* wordStart = NULL;
+	float wordStartX = 0;
+	float wordMinX = 0;
+	const char* breakEnd = NULL;
+	float breakWidth = 0;
+	float breakMaxX = 0;
+	int type = NVG_SPACE, ptype = NVG_SPACE;
+	unsigned int pcodepoint = 0;
+
+	if (maxRows == 0) return 0;
+	if (state->fontId == FONS_INVALID) return 0;
+
+	if (end == NULL)
+		end = string + strlen(string);
+
+	if (string == end) return 0;
+
+	fonsSetSize(ctx->fs, state->fontSize*scale);
+	fonsSetSpacing(ctx->fs, state->letterSpacing*scale);
+	fonsSetBlur(ctx->fs, state->fontBlur*scale);
+	fonsSetAlign(ctx->fs, state->textAlign);
+	fonsSetFont(ctx->fs, state->fontId);
+
+	fonsTextIterInit(ctx->fs, &iter, 0, 0, string, end, FONS_GLYPH_BITMAP_OPTIONAL);
+	prevIter = iter;
+	while (fonsTextIterNext(ctx->fs, &iter, &q)) {
+		if (iter.prevGlyphIndex < 0 && nvg__allocTextAtlas(ctx)) { // can not retrieve glyph?
+			iter = prevIter;
+			fonsTextIterNext(ctx->fs, &iter, &q); // try again
+		}
+		prevIter = iter;
+		switch (iter.codepoint) {
+			case 9:			// \t
+			case 11:		// \v
+			case 12:		// \f
+			case 32:		// space
+			case 0x00a0:	// NBSP
+				type = NVG_SPACE;
+				break;
+			case 10:		// \n
+				type = pcodepoint == 13 ? NVG_SPACE : NVG_NEWLINE;
+				break;
+			case 13:		// \r
+				type = pcodepoint == 10 ? NVG_SPACE : NVG_NEWLINE;
+				break;
+			case 0x0085:	// NEL
+				type = NVG_NEWLINE;
+				break;
+			default:
+				if ((iter.codepoint >= 0x4E00 && iter.codepoint <= 0x9FFF) ||
+					(iter.codepoint >= 0x3000 && iter.codepoint <= 0x30FF) ||
+					(iter.codepoint >= 0xFF00 && iter.codepoint <= 0xFFEF) ||
+					(iter.codepoint >= 0x1100 && iter.codepoint <= 0x11FF) ||
+					(iter.codepoint >= 0x3130 && iter.codepoint <= 0x318F) ||
+					(iter.codepoint >= 0xAC00 && iter.codepoint <= 0xD7AF))
+					type = NVG_CJK_CHAR;
+				else
+					type = NVG_CHAR;
+				break;
+		}
+
+		if (type == NVG_NEWLINE) {
+			// Always handle new lines.
+			rows[nrows].start = rowStart != NULL ? rowStart : iter.str;
+			rows[nrows].end = rowEnd != NULL ? rowEnd : iter.str;
+			rows[nrows].width = rowWidth * invscale;
+			rows[nrows].minx = rowMinX * invscale;
+			rows[nrows].maxx = rowMaxX * invscale;
+			rows[nrows].next = iter.next;
+			nrows++;
+			if (nrows >= maxRows)
+				return nrows;
+			// Set null break point
+			breakEnd = rowStart;
+			breakWidth = 0.0;
+			breakMaxX = 0.0;
+			// Indicate to skip the white space at the beginning of the row.
+			rowStart = NULL;
+			rowEnd = NULL;
+			rowWidth = 0;
+			rowMinX = rowMaxX = 0;
+		} else {
+			if (rowStart == NULL) {
+				// The current char is the row so far
+				rowStartX = iter.x;
+				rowStart = iter.str;
+				rowEnd = iter.next;
+				rowWidth = iter.nextx - rowStartX; // q.x1 - rowStartX;
+				rowMinX = q.x0 - rowStartX;
+				rowMaxX = q.x1 - rowStartX;
+				wordStart = iter.str;
+				wordStartX = iter.x;
+				wordMinX = q.x0 - rowStartX;
+				// Set null break point
+				breakEnd = rowStart;
+				breakWidth = 0.0;
+				breakMaxX = 0.0;
+			} else {
+				float nextWidth = iter.nextx - rowStartX;
+
+				rowEnd = iter.next;
+				rowWidth = iter.nextx - rowStartX;
+				rowMaxX = q.x1 - rowStartX;
+			}
+		}
+
+		pcodepoint = iter.codepoint;
+		ptype = type;
+	}
+
+	// Break the line from the end of the last word, and start new line from the beginning of the new.
+	if (rowStart != NULL) {
+		rows[nrows].start = rowStart;
+		rows[nrows].end = rowEnd;
+		rows[nrows].width = rowWidth * invscale;
+		rows[nrows].minx = rowMinX * invscale;
+		rows[nrows].maxx = rowMaxX * invscale;
+		rows[nrows].next = end;
+		nrows++;
+	}
+
+	return nrows;
+}
+
 float nvgTextBounds(NVGcontext* ctx, float x, float y, const char* string, const char* end, float* bounds)
 {
 	NVGstate* state = nvg__getState(ctx);

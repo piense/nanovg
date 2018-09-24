@@ -612,6 +612,8 @@ void nvgTextMetrics(NVGcontext* ctx, float* ascender, float* descender, float* l
 // Words longer than the max width are slit at nearest character (i.e. no hyphenation).
 int nvgTextBreakLines(NVGcontext* ctx, const char* string, const char* end, float breakRowWidth, NVGtextRow* rows, int maxRows);
 
+int nvgTextBreakLinesNoWrap(NVGcontext* ctx, const char* string, const char* end, NVGtextRow* rows, int maxRows);
+
 //
 // Internal Render API
 //
